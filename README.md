@@ -4,7 +4,7 @@
   <p style="font-size: 20px;">by 
     <a href="https://www.linkedin.com/in/dang-thi-tuong-vy-00a357278/">Vy Tuong Dang</a><sup>1*</sup>,
     <a href="https://anvo25.github.io/">An Vo</a><sup>1*</sup>,
-    <a href="#">Quang Tau</a><sup>1</sup>, 
+    <a href="https://www.linkedin.com/in/quang-tau-a708b4238/?originalSubdomain=kr">Quang Tau</a><sup>1</sup>, 
     <a href="#">Duc Dm</a><sup>1</sup>, 
     <a href="https://www.resl.kaist.ac.kr/members/director">Daeyoung Kim</a><sup>1</sup>
   </p>
