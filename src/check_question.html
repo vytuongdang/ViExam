@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViExam - Question Review System</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip for handling ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- PDF.js for PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <!-- React and ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- mammoth.js for DOCX rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <style>
+        .pdf-container {
+            height: 600px;
+            overflow-y: auto;
+        }
+        .document-viewer {
+            height: 600px;
+            overflow-y: auto;
+            background-color: white;
+        }
+        .split-view {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 768px) {
+            .split-view {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .zoom-button {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            background-color: #e5e7eb;
+            border-radius: 0.25rem;
+            border: 1px solid #d1d5db;
+        }
+        .zoom-button:hover {
+            background-color: #d1d5db;
+        }
+        .zoom-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .answer-btn-active {
+            background-color: #4f46e5 !important; /* indigo-600 */
+            color: white !important;
+            ring-width: 2px !important;
+            --tw-ring-color: #818cf8 !important; /* indigo-400 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root" class="min-h-screen"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        const FileReviewApp = () => {
+            const [mainFolderName, setMainFolderName] = useState('');
+            const [subfolders, setSubfolders] = useState([]);
+            const [selectedSubfolder, setSelectedSubfolder] = useState(null);
+            const [files, setFiles] = useState([]);
+            const [reviewedFiles, setReviewedFiles] = useState({});
+            const [currentFileIndex, setCurrentFileIndex] = useState(0);
+            const [showSummary, setShowSummary] = useState(false);
+            const [isDownloading, setIsDownloading] = useState(false);
+            const [stage, setStage] = useState('upload');
+            const [completedSubfolders, setCompletedSubfolders] = useState({});
+            const [allReviewedFiles, setAllReviewedFiles] = useState({});
+
+            const [currentAnswer, setCurrentAnswer] = useState('');
+            const [fileAnswers, setFileAnswers] = useState({});
+            const [allFileAnswers, setAllFileAnswers] = useState({});
+            const [showOtherInput, setShowOtherInput] = useState(false);
+            const [otherAnswer, setOtherAnswer] = useState('');
+
+            const [extractedImagesFolder, setExtractedImagesFolder] = useState(null);
+            const [originalDocumentsFolder, setOriginalDocumentsFolder] = useState(null);
+            const [currentOriginalDocument, setCurrentOriginalDocument] = useState(null);
+            const [documentLoading, setDocumentLoading] = useState(false);
+            const [documentType, setDocumentType] = useState(null);
+            const [documentError, setDocumentError] = useState(null);
+            const [documentPageNumber, setDocumentPageNumber] = useState(1);
+            const [totalPages, setTotalPages] = useState(0);
+            const [documentContent, setDocumentContent] = useState(null);
+
+            const [imageZoomLevel, setImageZoomLevel] = useState(1);
+            const ZOOM_STEP = 0.2;
+            const MIN_ZOOM = 0.2;
+            const MAX_ZOOM = 5;
+
+            // --- PDF Zoom State ---
+            const DEFAULT_PDF_VIEWPORT_SCALE = 1.5;
+            const [pdfViewportScale, setPdfViewportScale] = useState(DEFAULT_PDF_VIEWPORT_SCALE);
+            const PDF_ZOOM_STEP = 0.25;
+            const MIN_PDF_ZOOM = 0.5;
+            const MAX_PDF_ZOOM = 4.0;
+            
+            // --- DOCX/HTML content zoom State ---
+            const [documentZoomLevel, setDocumentZoomLevel] = useState(1);
+            const DOC_ZOOM_STEP = 0.1;
+            const MIN_DOC_ZOOM = 0.5;
+            const MAX_DOC_ZOOM = 3.0;
+
+            const pdfCanvasRef = useRef(null);
+            const documentViewerRef = useRef(null);
+
+            const letterAnswerOptions = ['A', 'B', 'C', 'D', 'E', 'F'];
+            const numericAnswerOptions = ['1', '2', '3', '4', '5'];
+            const allStandardAnswerOptions = useMemo(() =>
+                [...letterAnswerOptions, ...numericAnswerOptions],
+                []
+            );
+
+            useEffect(() => {
+                if (documentType === 'pdf' && currentOriginalDocument) {
+                    if (!documentContent || (documentContent.file !== currentOriginalDocument) ) {
+                        setDocumentLoading(true); setDocumentError(null);
+                        if (documentContent && typeof documentContent.destroy === 'function') documentContent.destroy();
+                        setDocumentContent(null); setTotalPages(0);
+                        const loadPdfProxy = async () => {
+                            try {
+                                const arrayBuffer = await currentOriginalDocument.arrayBuffer();
+                                const pdfProxy = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                                pdfProxy.file = currentOriginalDocument;
+                                setDocumentContent(pdfProxy); setTotalPages(pdfProxy.numPages);
+                            } catch (e) { setDocumentError(`PDF Error: ${e.message}`); setDocumentContent(null); setTotalPages(0); }
+                            finally { setDocumentLoading(false); }
+                        };
+                        loadPdfProxy();
+                    }
+                } else if (documentType !== 'pdf') {
+                    if (documentContent && typeof documentContent.destroy === 'function') documentContent.destroy();
+                    if (documentContent && typeof documentContent.getPage === 'function') setDocumentContent(null);
+                    if (totalPages !== 0) setTotalPages(0);
+                }
+            }, [currentOriginalDocument, documentType]);
+
+            useEffect(() => {
+                if (documentType === 'pdf' && documentContent && typeof documentContent.getPage === 'function' && pdfCanvasRef.current) {
+                    if (documentPageNumber > 0 && documentPageNumber <= totalPages) {
+                        setDocumentLoading(true);
+                        const renderPdfPageToCanvas = async () => {
+                            try {
+                                const page = await documentContent.getPage(documentPageNumber);
+                                const viewport = page.getViewport({ scale: pdfViewportScale });
+                                const canvas = pdfCanvasRef.current;
+                                if (!canvas) { setDocumentError("Error: PDF Canvas not found."); setDocumentLoading(false); return; }
+                                const context = canvas.getContext('2d');
+                                if (!context) { setDocumentError("Error: Cannot get 2D context."); setDocumentLoading(false); return; }
+                                canvas.height = viewport.height; canvas.width = viewport.width;
+                                await page.render({ canvasContext: context, viewport: viewport }).promise;
+                                setDocumentError(null);
+                            } catch (e) { setDocumentError(`Page ${documentPageNumber} Error: ${e.message}`); }
+                            finally { setDocumentLoading(false); }
+                        };
+                        renderPdfPageToCanvas();
+                    } else if (totalPages > 0 && (documentPageNumber < 1 || documentPageNumber > totalPages)) {
+                         setDocumentError(`Invalid page: ${documentPageNumber}. Total: ${totalPages}.`); setDocumentLoading(false);
+                    }
+                }
+            }, [documentContent, documentPageNumber, totalPages, documentType, pdfViewportScale]);
+
+            useEffect(() => {
+                setImageZoomLevel(1);
+                if (files.length > 0 && currentFileIndex < files.length) {
+                    const currentFilePath = files[currentFileIndex].webkitRelativePath;
+                    const savedAnswer = fileAnswers[currentFilePath] || '';
+
+                    if (savedAnswer && !allStandardAnswerOptions.includes(savedAnswer)) {
+                        setCurrentAnswer(savedAnswer);
+                        setOtherAnswer(savedAnswer);
+                        setShowOtherInput(true);
+                    } else {
+                        setCurrentAnswer(savedAnswer);
+                        setOtherAnswer('');
+                        setShowOtherInput(false);
+                    }
+                } else {
+                    setCurrentAnswer('');
+                    setOtherAnswer('');
+                    setShowOtherInput(false);
+                }
+            }, [currentFileIndex, files, fileAnswers, allStandardAnswerOptions]);
+
+
+            const handleFoldersUpload = async (e) => {
+                const upFiles = Array.from(e.target.files); if (upFiles.length === 0) return;
+                const folderName = upFiles[0].webkitRelativePath.split('/')[0];
+                if (!extractedImagesFolder) {
+                    setExtractedImagesFolder(upFiles); setMainFolderName(folderName);
+                    
+                    // --- MODIFICATION: Extract exam ID (e.g., "Biology_001") from filename prefix ---
+                    const subs = new Set();
+                    const examIdRegex = /^([a-zA-Z]+_\d+)_/; // Regex for "Subject_Number"
+
+                    upFiles.forEach(f => {
+                        const match = f.name.match(examIdRegex);
+                        if (match && match[1]) {
+                            subs.add(match[1]); // Add "Biology_001" to the Set
+                        }
+                    });
+                    // --- END OF MODIFICATION ---
+                    
+                    setSubfolders(Array.from(subs).sort());
+                    alert("Image folder uploaded. Next, upload the original documents folder.");
+                } else {
+                    setOriginalDocumentsFolder(upFiles);
+                    setStage('select-subfolder');
+                }
+            };
+
+            const findOriginalDocument = (subfolderName) => {
+                if (!originalDocumentsFolder) return null;
+                const norm = (s) => s.toLowerCase().replace(/_0+(\d+)/g,'_$1').replace(/(\D)0+(\d+)/g,'$1$2').replace(/^0+(\d+)/g,'$1').replace(/[-_\s]+/g,'').trim();
+                const normSub = norm(subfolderName);
+                const docs = originalDocumentsFolder.filter(f => ['.pdf','.docx','.doc'].some(ext => f.name.toLowerCase().endsWith(ext)));
+                if (docs.length === 0) return null;
+                const getName = (f) => f.name.split('.').slice(0,-1).join('.'); let match;
+                match = docs.find(f => getName(f).toLowerCase() === subfolderName.toLowerCase()); if (match) return match;
+                match = docs.find(f => norm(getName(f)) === normSub); if (match) return match;
+                match = docs.find(f => { const nF=norm(getName(f)); return nF.startsWith(normSub)||normSub.startsWith(nF)||nF.includes(normSub)||normSub.includes(nF);}); if (match) return match;
+                const sNums=(subfolderName.match(/\d+/g)||[]).map(n=>String(parseInt(n,10))); if(sNums.length>0){match=docs.find(f=>(getName(f).match(/\d+/g)||[]).map(n=>String(parseInt(n,10))).some(fN=>sNums.includes(fN)));} if(match) return match;
+                match = docs.find(f => f.webkitRelativePath.split('/').slice(1,-1).some(p => norm(p) === normSub || p.toLowerCase() === subfolderName.toLowerCase())); if (match) return match;
+                return null;
+            };
+
+            const clearDocumentState = () => {
+                if (documentContent && typeof documentContent.destroy === 'function') documentContent.destroy();
+                setCurrentOriginalDocument(null); setDocumentContent(null); setDocumentType(null);
+                setTotalPages(0); setDocumentPageNumber(1); setDocumentError(null); setDocumentLoading(false);
+            };
+
+            const loadOriginalDocument = async (docFile) => {
+                clearDocumentState(); if (!docFile) { setDocumentError("Original document not found."); return; }
+                setDocumentLoading(true); setCurrentOriginalDocument(docFile); const fName = docFile.name.toLowerCase();
+                if (fName.endsWith('.pdf')) setDocumentType('pdf');
+                else if (fName.endsWith('.docx') || fName.endsWith('.doc')) {
+                    setDocumentType(fName.endsWith('.docx') ? 'docx' : 'doc');
+                    try {
+                        const arrBuf = await docFile.arrayBuffer();
+                        if (fName.endsWith('.doc')) { setDocumentError(".doc not supported for viewing. Convert to .docx/pdf."); setDocumentContent("<p class='p-4 text-red-600'>.doc not supported.</p>");}
+                        else { const res = await mammoth.convertToHtml({arrayBuffer:arrBuf}); setDocumentContent(res.value); }
+                    } catch (e) { setDocumentError(`Word Error: ${e.message}`); setDocumentContent(null); }
+                    finally { setDocumentLoading(false); }
+                } else { setDocumentError("Unsupported format: "+docFile.name); setDocumentLoading(false); }
+            };
+
+            const changePdfPage = (newPage) => { if (documentType==='pdf' && documentContent && !documentLoading && newPage>=1 && newPage<=totalPages) setDocumentPageNumber(newPage); };
+
+            const handleSubfolderSelect = (subfolder) => {
+                clearDocumentState(); setSelectedSubfolder(subfolder); setImageZoomLevel(1);
+                setPdfViewportScale(DEFAULT_PDF_VIEWPORT_SCALE);
+                setDocumentZoomLevel(1);
+                
+                const subFiles = extractedImagesFolder
+                    // --- MODIFICATION: Filter files by filename prefix ---
+                    .filter(f => f.name.startsWith(subfolder))
+                    // --- END OF MODIFICATION ---
+                    .sort((a, b) => {
+                        const isTextA = a.name.includes('_text_only');
+                        const isTextB = b.name.includes('_text_only');
+
+                        if (isTextA && !isTextB) {
+                            return -1; 
+                        }
+                        if (!isTextA && isTextB) {
+                            return 1;
+                        }
+
+                        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+                    });
+
+                setFiles(subFiles); setCurrentFileIndex(0);
+
+                const docFile = findOriginalDocument(subfolder); loadOriginalDocument(docFile);
+
+                let exRev={}; Object.entries(allReviewedFiles).forEach(([p,d])=>{if(p.split('/')[1]===subfolder)exRev[p]=d;}); setReviewedFiles(exRev);
+                let existingSubfolderAnswers = {}; Object.entries(allFileAnswers).forEach(([p,ans])=>{if(p.split('/')[1]===subfolder)existingSubfolderAnswers[p]=ans;}); setFileAnswers(existingSubfolderAnswers);
+
+                if (subFiles.length>0 && subFiles.every(f=>exRev[f.webkitRelativePath])) {setShowSummary(true);setStage('summary');} else {setShowSummary(false);setStage('review');}
+            };
+
+            const handleReview = (decision) => {
+                if (files.length===0) return;
+                const currentFilePath = files[currentFileIndex].webkitRelativePath;
+                setReviewedFiles(prev => ({...prev, [currentFilePath]: decision }));
+
+                setFileAnswers(prev => ({...prev, [currentFilePath]: currentAnswer.trim() }));
+
+                if (currentFileIndex < files.length-1) {
+                    setCurrentFileIndex(prev => prev+1);
+                } else {
+                    setShowSummary(true);
+                    setStage('summary');
+                }
+            };
+
+            const handlePrevious = () => {
+                if (currentFileIndex > 0) {
+                    setCurrentFileIndex(prevIndex => prevIndex - 1);
+                    if (showSummary) setShowSummary(false);
+                    if (stage !== 'review') setStage('review');
+                }
+            };
+
+            const saveAndContinue = () => {
+                setAllReviewedFiles(prev => ({...prev,...reviewedFiles}));
+                setAllFileAnswers(prev => ({...prev, ...fileAnswers}));
+                setCompletedSubfolders(prev => ({...prev, [selectedSubfolder]: {fileCount: files.length, decisions: Object.values(reviewedFiles).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{Yes:0,No:0,Modify:0}) }}));
+
+                clearDocumentState(); setSelectedSubfolder(null); setFiles([]);
+                setReviewedFiles({}); setFileAnswers({});
+                setCurrentAnswer(''); setOtherAnswer(''); setShowOtherInput(false);
+                setCurrentFileIndex(0); setShowSummary(false); setImageZoomLevel(1);
+                setPdfViewportScale(DEFAULT_PDF_VIEWPORT_SCALE);
+                setDocumentZoomLevel(1);
+                setStage('select-subfolder');
+            };
+
+            const showFinalSummary = () => setStage('final-summary');
+            const backToSubfolderSelection = () => {
+                clearDocumentState(); setSelectedSubfolder(null); setFiles([]);
+                setReviewedFiles({}); setFileAnswers({});
+                setCurrentAnswer(''); setOtherAnswer(''); setShowOtherInput(false);
+                setImageZoomLevel(1);
+                setPdfViewportScale(DEFAULT_PDF_VIEWPORT_SCALE);
+                setDocumentZoomLevel(1);
+                setStage('select-subfolder');
+            };
+            const resetReview = () => {
+                setCurrentFileIndex(0);
+                setReviewedFiles({});
+                setFileAnswers({});
+                setCurrentAnswer(''); setOtherAnswer(''); setShowOtherInput(false);
+                setShowSummary(false);
+                setImageZoomLevel(1);
+                setPdfViewportScale(DEFAULT_PDF_VIEWPORT_SCALE);
+                setDocumentZoomLevel(1);
+                setStage('review');
+            };
+
+            const handleZoomIn = () => setImageZoomLevel(prev => Math.min(MAX_ZOOM, prev + ZOOM_STEP));
+            const handleZoomOut = () => setImageZoomLevel(prev => Math.max(MIN_ZOOM, prev - ZOOM_STEP));
+            const handleResetZoom = () => setImageZoomLevel(1);
+
+            const handlePdfZoomIn = () => setPdfViewportScale(prev => Math.min(MAX_PDF_ZOOM, prev + PDF_ZOOM_STEP));
+            const handlePdfZoomOut = () => setPdfViewportScale(prev => Math.max(MIN_PDF_ZOOM, prev - PDF_ZOOM_STEP));
+            const handlePdfResetZoom = () => setPdfViewportScale(DEFAULT_PDF_VIEWPORT_SCALE);
+            
+            const handleDocZoomIn = () => setDocumentZoomLevel(prev => Math.min(MAX_DOC_ZOOM, prev + DOC_ZOOM_STEP));
+            const handleDocZoomOut = () => setDocumentZoomLevel(prev => Math.max(MIN_DOC_ZOOM, prev - DOC_ZOOM_STEP));
+            const handleDocResetZoom = () => setDocumentZoomLevel(1);
+
+            const handleAnswerSelect = (option) => {
+                if (option === 'OTHER') {
+                    setShowOtherInput(true);
+                    setCurrentAnswer(otherAnswer.trim().toUpperCase());
+                } else {
+                    setShowOtherInput(false);
+                    setOtherAnswer('');
+                    setCurrentAnswer(option);
+                }
+            };
+
+            const handleOtherAnswerChange = (e) => {
+                const val = e.target.value.toUpperCase();
+                setOtherAnswer(val);
+                setCurrentAnswer(val.trim());
+            };
+
+
+            const downloadAllOrganizedFiles = async () => {
+                setIsDownloading(true);
+                try {
+                    const zip = new JSZip();
+                    const mainZip = zip.folder(mainFolderName);
+                    
+                    // --- MODIFICATION: Regex to extract subfolder name from filename ---
+                    const examIdRegex = /^([a-zA-Z]+_\d+)_/;
+
+                    for (const [path, dec] of Object.entries(allReviewedFiles)) {
+                        const parts = path.split('/');
+                        let originalFileNameWithExt = parts.pop();
+                        
+                        // --- MODIFICATION: Get subfolder from filename prefix ---
+                        const prefixMatch = originalFileNameWithExt.match(examIdRegex);
+                        if (!prefixMatch) continue; // Skip if format doesn't match
+                        const sub = prefixMatch[1]; // e.g., "Biology_001"
+                        // --- END OF MODIFICATION ---
+
+                        const fObj = extractedImagesFolder.find(f => f.webkitRelativePath === path);
+                        if (!fObj) continue;
+
+                        let nameBeingModified = originalFileNameWithExt;
+
+                        const answer = allFileAnswers[path];
+                        if (answer && answer.trim() !== '') {
+                          const nameWithoutExt = nameBeingModified.substring(0, nameBeingModified.lastIndexOf('.'));
+                          const ext = nameBeingModified.substring(nameBeingModified.lastIndexOf('.'));
+                          const sanitizedAnswer = answer.trim().replace(/[^a-zA-Z0-9-_]/g, '');
+                          nameBeingModified = `${nameWithoutExt}_key_${sanitizedAnswer}${ext}`;
+                        }
+
+                        let finalFileName = nameBeingModified;
+                        const currentNameWithoutExt = finalFileName.substring(0, finalFileName.lastIndexOf('.'));
+                        const currentExt = finalFileName.substring(finalFileName.lastIndexOf('.'));
+
+                        let baseNameToSwap = currentNameWithoutExt;
+                        let keySuffix = "";
+
+                        const keyPattern = /_key_([a-zA-Z0-9_-]+)$/;
+                        const keyMatch = baseNameToSwap.match(keyPattern);
+
+                        if (keyMatch) {
+                            keySuffix = keyMatch[0];
+                            baseNameToSwap = baseNameToSwap.substring(0, baseNameToSwap.length - keySuffix.length);
+                        }
+
+                        let swappedBaseName = baseNameToSwap;
+                        if (dec === 'Yes') {
+                            if (baseNameToSwap.endsWith('_text_only')) {
+                                swappedBaseName = baseNameToSwap.substring(0, baseNameToSwap.length - '_text_only'.length) + '_image';
+                            }
+                        } else if (dec === 'No') {
+                            if (baseNameToSwap.endsWith('_image')) {
+                                swappedBaseName = baseNameToSwap.substring(0, baseNameToSwap.length - '_image'.length) + '_text_only';
+                            }
+                        }
+
+                        finalFileName = swappedBaseName + keySuffix + currentExt;
+
+                        const targetFolderName = dec === 'Yes' ? "question_image" :
+                                               dec === 'No' ? "question_full_text" : "question_modify";
+
+                        mainZip.folder(sub).folder(targetFolderName).file(finalFileName, await fObj.arrayBuffer());
+                    }
+
+                    const oDocs = new Set();
+                    Object.keys(completedSubfolders).forEach(s => {
+                        const d = findOriginalDocument(s);
+                        if (d) oDocs.add(d);
+                    });
+                    if (oDocs.size > 0) {
+                        const oZip = mainZip.folder("Original_Documents_Reviewed");
+                        for (const f of oDocs) {
+                            try {
+                                oZip.file(f.name, await f.arrayBuffer());
+                            } catch (e) {
+                                console.error(`Error adding original document ${f.name} to ZIP:`, e);
+                            }
+                        }
+                    }
+
+                    const blob = await zip.generateAsync({type:'blob'});
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${mainFolderName}_Reviewed.zip`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+
+                } catch (e) {
+                    console.error("Error during ZIP creation:", e);
+                    alert("Error creating ZIP file. Check console for details.");
+                } finally {
+                    setIsDownloading(false);
+                }
+            };
+
+            const renderSubfolderSelector = () => (stage === 'select-subfolder' && (
+                <div className="mt-6 p-4 border rounded bg-gray-50">
+                    <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-medium">Select Exam Folder to Review</h3>{Object.keys(completedSubfolders).length>0 && (<button onClick={showFinalSummary} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700">View Summary ({Object.keys(completedSubfolders).length})</button>)}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {subfolders.map(sub=>(<button key={sub} onClick={()=>handleSubfolderSelect(sub)} className={`p-3 border rounded text-left flex items-center gap-2 ${completedSubfolders[sub]?'bg-green-100 hover:bg-green-200':'bg-white hover:bg-blue-50'}`}><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 shrink-0 ${completedSubfolders[sub]?'text-green-500':'text-yellow-500'}`} viewBox="0 0 20 20" fill="currentColor">{completedSubfolders[sub]?<path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>:<path fillRule="evenodd" d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1H2V6zm0 3h16v5a2 2 0 01-2 2H4a2 2 0 01-2-2V9z" clipRule="evenodd"/>}</svg><span className="truncate grow" title={sub}>{sub}</span>{completedSubfolders[sub]&&<span className="ml-auto text-xs text-green-700 bg-green-200 px-1.5 py-0.5 rounded-full">Done</span>}</button>))}
+                    </div>
+                </div>
+            ));
+
+            const renderDocumentViewer = () => {
+                if (documentLoading && !documentContent) return <div className="p-4 flex items-center justify-center h-full"><div className="loading-spinner mx-auto"></div><p>Loading...</p></div>;
+                if (!currentOriginalDocument) return <div className="p-4 flex items-center justify-center h-full border-red-300"><div className="text-center text-red-700"><svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p className="font-semibold">Original Document Not Found</p><p className="text-sm">{documentError||"Please check."}</p></div></div>;
+                if (documentType === 'pdf') {
+                    if (!documentContent && !documentLoading) return <div className="p-4 flex items-center justify-center h-full border-red-300"><div className="text-center text-red-700"><p>PDF Load Error: {documentError||"Cannot parse."}</p></div></div>;
+                    return (
+                        <div className="bg-white rounded h-full flex flex-col">
+                            <div className="p-2 bg-gray-100 border-b flex items-center justify-between shrink-0">
+                                <div className="text-sm font-medium truncate mr-2" title={currentOriginalDocument.name}>
+                                    PDF: {currentOriginalDocument.name}
+                                </div>
+                                <div className="flex items-center space-x-3">
+                                    <div className="flex items-center space-x-1">
+                                        <button onClick={handlePdfZoomOut} disabled={pdfViewportScale <= MIN_PDF_ZOOM || documentLoading} className="zoom-button" title="Zoom Out">-</button>
+                                        <button onClick={handlePdfResetZoom} disabled={pdfViewportScale === DEFAULT_PDF_VIEWPORT_SCALE || documentLoading} className="zoom-button" title={`Reset Zoom to ${Math.round(DEFAULT_PDF_VIEWPORT_SCALE * 100)}%`}>{Math.round(pdfViewportScale * 100)}%</button>
+                                        <button onClick={handlePdfZoomIn} disabled={pdfViewportScale >= MAX_PDF_ZOOM || documentLoading} className="zoom-button" title="Zoom In">+</button>
+                                    </div>
+                                    {totalPages > 0 && (
+                                        <div className="flex items-center space-x-2">
+                                            <button onClick={() => changePdfPage(documentPageNumber - 1)} disabled={documentPageNumber <= 1 || documentLoading} className="px-2 py-1 bg-gray-200 rounded disabled:opacity-50 hover:bg-gray-300">◀</button>
+                                            <span>Page {documentPageNumber}/{totalPages}</span>
+                                            <button onClick={() => changePdfPage(documentPageNumber + 1)} disabled={documentPageNumber >= totalPages || documentLoading} className="px-2 py-1 bg-gray-200 rounded disabled:opacity-50 hover:bg-gray-300">▶</button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            {documentError && <p className="p-1 text-xs text-red-600 bg-red-50 border-b">{documentError}</p>}
+                            {documentLoading && documentContent && <div className="p-4 flex items-center justify-center grow"><div className="loading-spinner mx-auto"></div></div>}
+                            <div className={`pdf-container grow ${documentLoading && documentContent ? 'hidden':''}`}><div className="flex justify-center py-2"><canvas ref={pdfCanvasRef}></canvas></div></div>
+                        </div>
+                    );
+                } else if (documentType === 'docx' || documentType === 'doc') {
+                    return (
+                        <div className="bg-white rounded h-full flex flex-col">
+                            <div className="p-2 bg-gray-100 border-b shrink-0 flex justify-between items-center">
+                                <div className="text-sm font-medium truncate" title={currentOriginalDocument.name}>
+                                  Word: {currentOriginalDocument.name}
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                    <button onClick={handleDocZoomOut} disabled={documentZoomLevel <= MIN_DOC_ZOOM} className="zoom-button" title="Zoom Out">-</button>
+                                    <button onClick={handleDocResetZoom} disabled={documentZoomLevel === 1} className="zoom-button" title="Reset Zoom">{Math.round(documentZoomLevel*100)}%</button>
+                                    <button onClick={handleDocZoomIn} disabled={documentZoomLevel >= MAX_DOC_ZOOM} className="zoom-button" title="Zoom In">+</button>
+                                </div>
+                            </div>
+                            {documentError && !documentContent && <p className="p-1 text-xs text-red-600 bg-red-50 border-b">{documentError}</p>}
+                            <div className="document-viewer grow" ref={documentViewerRef}>
+                                <div
+                                    style={{
+                                        transform: `scale(${documentZoomLevel})`,
+                                        transformOrigin: 'top left',
+                                    }}
+                                    className="p-4"
+                                    dangerouslySetInnerHTML={{__html: typeof documentContent === 'string' ? documentContent : "<p>Processing...</p>"}}
+                                />
+                            </div>
+                        </div>
+                    );
+                }
+                return <div className="p-4 flex items-center justify-center h-full"><p>{documentError||"Cannot display."}</p></div>;
+            };
+
+            const renderFilePreview = () => {
+                if (stage !== 'review' || files.length === 0) return null;
+                const currentFile = files[currentFileIndex]; const fileType = currentFile.type.split('/')[0]; const fileName = currentFile.name;
+                const hasPrevious = currentFileIndex > 0;
+
+                return (
+                    <div className="mt-9 p-6 border rounded bg-gray-50">
+                        <div className="flex justify-between items-center mb-2"><h3 className="text-lg font-medium">Reviewing: <span className="text-blue-600">{selectedSubfolder}</span></h3><button onClick={backToSubfolderSelection} className="text-sm text-gray-600 hover:text-gray-800 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd"/></svg>Back</button></div>
+                        <div className="p-4 bg-blue-50 rounded mb-4"><p className="text-sm">File {currentFileIndex + 1}/{files.length}: <span className="font-medium">{fileName}</span></p></div>
+
+                        <div className="split-view" style={{height: '650px'}}>
+                            <div className="border rounded bg-white flex flex-col">
+                                <div className="p-2 bg-gray-100 border-b shrink-0 flex justify-between items-center">
+                                    <div className="text-sm font-medium">Extracted Question Image</div>
+                                    {fileType === 'image' && (
+                                        <div className="flex items-center space-x-1">
+                                            <button onClick={handleZoomOut} disabled={imageZoomLevel <= MIN_ZOOM} className="zoom-button" title="Zoom Out">-</button>
+                                            <button onClick={handleResetZoom} disabled={imageZoomLevel === 1} className="zoom-button" title="Reset Zoom">{Math.round(imageZoomLevel*100)}%</button>
+                                            <button onClick={handleZoomIn} disabled={imageZoomLevel >= MAX_ZOOM} className="zoom-button" title="Zoom In">+</button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="p-8 flex justify-center items-center grow overflow-auto">
+                                    {fileType === 'image' ? (
+                                        <img
+                                            src={URL.createObjectURL(currentFile)}
+                                            alt={fileName}
+                                            className="max-h-full max-w-full object-contain transition-transform duration-150 ease-out"
+                                            style={{ transform: `scale(${imageZoomLevel})`, transformOrigin: 'center' }}
+                                        />
+                                    ) : ( <div className="p-4 bg-gray-100 rounded"><p>Cannot preview {fileType}</p></div> )}
+                                </div>
+                            </div>
+                            <div className="border rounded bg-white flex flex-col">{renderDocumentViewer()}</div>
+                        </div>
+
+                        <div className="mt-6">
+                            <label className="block text-base font-bold text-gray-700 mb-2">Select Answer:</label>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                                {letterAnswerOptions.map(opt => (
+                                    <button
+                                        key={opt}
+                                        onClick={() => handleAnswerSelect(opt)}
+                                        className={`px-8 py-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500
+                                            ${currentAnswer === opt && !showOtherInput ? 'answer-btn-active' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                                <button
+                                    onClick={() => handleAnswerSelect('OTHER')}
+                                    className={`px-8 py-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500
+                                        ${showOtherInput ? 'answer-btn-active' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                                >
+                                    Other
+                                </button>
+                            </div>
+                            {showOtherInput && (
+                                <input
+                                    type="text"
+                                    value={otherAnswer}
+                                    onChange={handleOtherAnswerChange}
+                                    placeholder="Enter custom answer (e.g., G, X, Y, Z)"
+                                    className="mt-1 mb-2 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm w-full max-w-xs"
+                                />
+                            )}
+                            <div className="flex flex-wrap gap-2 mt-4 mb-2">
+                                {numericAnswerOptions.map(opt => (
+                                    <button
+                                        key={opt}
+                                        onClick={() => handleAnswerSelect(opt)}
+                                        className={`px-8 py-4 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500
+                                            ${currentAnswer === opt && !showOtherInput ? 'answer-btn-active' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+
+                        <div className="flex justify-center items-center space-x-2 sm:space-x-3 mt-6">
+                            <button
+                                onClick={handlePrevious}
+                                disabled={!hasPrevious}
+                                className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            >
+                                Previous
+                            </button>
+                            <button onClick={()=>handleReview('Yes')} className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">Yes (Image Question)</button>
+                            <button onClick={()=>handleReview('No')} className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">No (Full-text question)</button>
+                            <button onClick={()=>handleReview('Modify')} className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600">Modify (Editing)</button>
+                        </div>
+                        <div className="mt-4 h-2 bg-gray-200 rounded"><div className="h-2 bg-blue-500 rounded" style={{width:`${((currentFileIndex + 1) / files.length) * 100}%`}}></div></div>
+                    </div>
+                );
+            };
+
+            const renderSummary = () => (stage === 'summary' && (
+                <div className="mt-6 p-4 border rounded bg-gray-50">
+                    <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-medium">Folder Review Summary</h3><button onClick={backToSubfolderSelection} className="text-sm hover:text-gray-800 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd"/></svg>Cancel</button></div>
+                    <p className="p-2 bg-blue-50 rounded mb-4">{mainFolderName}/{selectedSubfolder} ({files.length} files)</p>
+                    <div className="grid grid-cols-3 gap-4 mb-4">{['Yes','No','Modify'].map(k=>(<div key={k} className={`p-3 bg-${k==='Yes'?'green':k==='No'?'red':'yellow'}-100 rounded text-center`}><div className={`text-2xl font-bold text-${k==='Yes'?'green':k==='No'?'red':'yellow'}-700`}>{(reviewedFiles?Object.values(reviewedFiles):[]).filter(d=>d===k).length}</div><div className={`text-sm text-${k==='Yes'?'green':k==='No'?'red':'yellow'}-700`}>{k}</div></div>))}</div>
+                    <div className="max-h-64 overflow-y-auto border rounded p-2 mb-4 bg-white">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="bg-gray-100">
+                                    <th className="p-2 text-left">File Name</th>
+                                    <th className="p-2 text-left">Decision</th>
+                                    <th className="p-2 text-left">Answer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {Object.entries(reviewedFiles).map(([p,d])=>(
+                                    <tr key={p} className="border-t">
+                                        <td className="p-2 break-all">{p.split('/').pop()}</td>
+                                        <td className={`p-2 font-semibold text-${d==='Yes'?'green':d==='No'?'red':'yellow'}-600`}>{d}</td>
+                                        <td className="p-2 text-gray-700">{fileAnswers[p] || '-'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="flex flex-col sm:flex-row justify-center gap-4"><button onClick={resetReview} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Review Again</button><button onClick={saveAndContinue} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">Save & Continue</button></div>
+                </div>
+            ));
+
+            const renderFinalSummary = () => (stage === 'final-summary' && (
+                <div className="mt-6 p-4 border rounded bg-gray-50">
+                    <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-medium">Overall Review Summary</h3><button onClick={backToSubfolderSelection} className="text-sm hover:text-gray-800 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd"/></svg>Back</button></div>
+                    <p className="p-2 bg-blue-50 rounded mb-4">Main Folder: {mainFolderName}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">{['Folders','Yes','No','Modify'].map((k,i)=>{const total=Object.values(completedSubfolders).reduce((a,c)=>a+(i===0?1:c.decisions[k]||0),0); return(<div key={k} className={`p-4 bg-${i===0?'indigo':k==='Yes'?'green':k==='No'?'red':'yellow'}-100 rounded text-center`}><div className={`text-2xl font-bold text-${i===0?'indigo':k==='Yes'?'green':k==='No'?'red':'yellow'}-700`}>{total}</div><div className={`text-sm text-${i===0?'indigo':k==='Yes'?'green':k==='No'?'red':'yellow'}-700`}>{k}{i===0?' Reviewed':""}</div></div>)})}</div>
+                    <div className="max-h-64 overflow-y-auto border rounded p-2 mb-4 bg-white"><table className="w-full text-sm"><thead><tr className="bg-gray-100"><th className="p-2 text-left">Folder Name</th><th className="p-2 text-center">Files</th><th className="p-2 text-center">Yes</th><th className="p-2 text-center">No</th><th className="p-2 text-center">Modify</th></tr></thead><tbody>{Object.entries(completedSubfolders).map(([n,d])=>(<tr key={n} className="border-t"><td className="p-2 font-medium">{n}</td><td className="p-2 text-center">{d.fileCount}</td><td className="p-2 text-center text-green-600">{d.decisions.Yes||0}</td><td className="p-2 text-center text-red-600">{d.decisions.No||0}</td><td className="p-2 text-center text-yellow-600">{d.decisions.Modify||0}</td></tr>))}</tbody></table></div>
+                    <div className="flex flex-col sm:flex-row justify-center gap-4"><button onClick={backToSubfolderSelection} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Continue Reviewing</button><button onClick={downloadAllOrganizedFiles} disabled={isDownloading||Object.keys(allReviewedFiles).length===0} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-indigo-300">{isDownloading?'Zipping...':'Download ZIP'}</button></div>
+                </div>
+            ));
+
+            return (
+                <div className="p-4 sm:p-6 w-full">
+                    <h1 className="text-2xl font-bold mb-6 text-center sm:text-left">ViExam Question Review System</h1>
+                    <div className="mb-6">
+                        {stage === 'upload' && (
+                            <div>
+                                <div className="p-6 border rounded bg-white shadow mb-8">
+                                    <p className="mb-3 text-base">
+                                        Review extracted question images against original documents:
+                                    </p>
+                                    <ul className="list-disc pl-6 mb-4 text-sm">
+                                        <li><span className="text-green-600 font-medium">Yes</span>: Image Question → <code className="bg-gray-200 px-1 rounded text-xs">question_image</code></li>
+                                        <li><span className="text-red-600 font-medium">No</span>: Full text is the question → <code className="bg-gray-200 px-1 rounded text-xs">question_full_text</code></li>
+                                        <li><span className="text-yellow-600 font-medium">Modify</span>: Needs editing → <code className="bg-gray-200 px-1 rounded text-xs">question_modify</code></li>
+                                    </ul>
+                                    <p className="text-sm">Select the answer using buttons (A-F, 1-5, Other). If an answer is provided, the filename will be appended with <code className="bg-gray-200 px-1 rounded text-xs">_key_ANSWER</code>.</p>
+                                    <p className="text-sm mt-1">If 'Yes' is chosen, <code className="bg-gray-200 px-1 rounded text-xs">_text_only</code> in filename becomes <code className="bg-gray-200 px-1 rounded text-xs">_image</code>.</p>
+                                    <p className="text-sm mt-1">If 'No' is chosen, <code className="bg-gray-200 px-1 rounded text-xs">_image</code> in filename becomes <code className="bg-gray-200 px-1 rounded text-xs">_text_only</code>.</p>
+                                </div>
+
+                                <div className="p-6 border rounded bg-white shadow">
+                                    <h3 className="font-medium text-xl mb-6 text-center">Upload Folders</h3>
+                                    <p className="text-sm text-gray-500 mb-6 text-center">
+                                        1. Upload extracted question images folder. 2. Upload original documents folder (PDF, DOCX).
+                                    </p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="border-2 border-dashed rounded-lg p-8 bg-gray-50 flex flex-col items-center justify-center text-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                            <h4 className={`font-medium text-lg mb-3 ${extractedImagesFolder?'text-green-600':''}`}>{extractedImagesFolder?"✓ Images Uploaded":"1. Upload Image Folder"}</h4>
+                                            {!extractedImagesFolder && <label className="px-5 py-2.5 bg-blue-500 text-white text-base rounded hover:bg-blue-600 cursor-pointer">Upload Images<input type="file" webkitdirectory="true" directory="true" multiple className="hidden" onChange={handleFoldersUpload}/></label>}
+                                            {extractedImagesFolder && <p className="text-sm text-green-700">{extractedImagesFolder.length} files, {subfolders.length} subfolders</p>}
+                                        </div>
+                                        <div className={`border-2 border-dashed rounded-lg p-8 bg-gray-50 flex flex-col items-center justify-center text-center ${extractedImagesFolder?'':'bg-gray-200 opacity-50'}`}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                            <h4 className={`font-medium text-lg mb-3 ${originalDocumentsFolder?'text-green-600':''}`}>{originalDocumentsFolder?"✓ Documents Uploaded":"2. Upload Document Folder"}</h4>
+                                            {extractedImagesFolder && !originalDocumentsFolder && <label className="px-5 py-2.5 bg-blue-500 text-white text-base rounded hover:bg-blue-600 cursor-pointer">Upload Documents<input type="file" webkitdirectory="true" directory="true" multiple className="hidden" onChange={handleFoldersUpload}/></label>}
+                                            {originalDocumentsFolder && <p className="text-sm text-green-700">{originalDocumentsFolder.length} files</p>}
+                                            {!extractedImagesFolder && <p className="text-sm text-gray-500">Upload image folder first.</p>}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {stage !== 'upload' && (
+                            <div className="flex items-center gap-2 p-2 bg-blue-100 border border-blue-300 rounded shadow-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1H2V6zm0 3h16v5a2 2 0 01-2 2H4a2 2 0 01-2-2V9z" clipRule="evenodd"/></svg>
+                                <span className="font-medium text-blue-800">{mainFolderName}</span> ({subfolders.length} subfolders)
+                                {Object.keys(completedSubfolders).length > 0 && (<span className="ml-auto text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded-full">{Object.keys(completedSubfolders).length}/{subfolders.length} reviewed</span>)}
+                            </div>
+                        )}
+                    </div>
+                    {renderSubfolderSelector()}
+                    {renderFilePreview()}
+                    {renderSummary()}
+                    {renderFinalSummary()}
+                    {stage === 'upload' && !extractedImagesFolder &&
+                        <div className="mt-8 p-8 text-center bg-gray-50 rounded-lg border border-dashed">
+                            <p>Upload folders to start.</p>
+                        </div>
+                    }
+                </div>
+            );
+        };
+        ReactDOM.createRoot(document.getElementById('root')).render(<FileReviewApp />);
+    </script>
+</body>
+</html>

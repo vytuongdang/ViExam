@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViExam JSON Editor - Step by Step</title>
+    <!-- JSZip library for creating ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- FileSaver.js library for saving files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- MathJax for rendering LaTeX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+    <style>
+        /* Define primary pink color palette */
+        :root {
+            --primary-pink: #FF69B4; 
+            --dark-pink: #E05B9C;   
+            --light-pink: #FCE7F3;  
+            --info-color: #C2185B;  
+            --info-border: #F8BBD0;
+
+            /* Specific colors for Step 1 active state (light blue from your screenshot) */
+            --step-active-bg: #e3f2fd; 
+            --step-active-border: #90CAF9; 
+
+            /* NEW: Specific colors for edit status buttons */
+            --minor-edit-button-color: #ADD8E6;
+            --major-edit-button-color: #FFB6C1; 
+            --no-edit-button-color: #FFFACD;   
+            --edit-status-button-text-dark: #495057; 
+            
+            /* NEW: Color for Current Status text */
+            --current-status-text-color: #DC3545; 
+
+            /* Colors for question list status labels */
+            --status-minor: #4CAF50; 
+            --status-major: #FFC107; 
+            --status-no-edit: #6c757d; 
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            background-color: #ffffff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 {
+            color: #2c3e50;
+            margin: 0 auto 20px auto; 
+            text-align: center;
+            font-size: 1.5em;
+            /* Styles for the H1 frame */
+            background-color: var(--light-pink);
+            border: 2px solid var(--primary-pink); 
+            border-radius: 8px;
+            padding: 10px 20px;
+            display: block; 
+            width: fit-content; /* Make the width fit its content */
+        }
+        .setup-container {
+            /* This is the outer frame with white background and pink border */
+            max-width: 90%; 
+            margin: 20px auto; 
+            background-color: #ffffff;
+            border: 2px solid var(--primary-pink); 
+            border-radius: 8px; 
+            padding: 40px 80px 100px 80px; 
+            
+            /* Use flexbox for inner layout management (rows) */
+            display: flex;
+            flex-direction: column;
+            gap: 30px; 
+        }
+        .setup-row {
+            display: flex;
+            gap: 30px; 
+            flex-wrap: wrap; 
+            justify-content: center; 
+            width: 100%;
+        }
+        .setup-step {
+            flex: 1; 
+            min-width: 300px; 
+            max-width: 450px;
+            background-color: var(--light-pink); 
+            border: 1px solid #e0e0e0; 
+            border-radius: 8px;
+            padding: 30px; 
+            transition: all 0.3s ease;
+        }
+
+        /* Styles for completed and active steps */
+        .setup-step.completed {
+            border-color: #28a745; 
+            background-color: #d4edda; 
+        }
+        .setup-step.active {
+            border-color: var(--step-active-border); 
+            background-color: var(--step-active-bg); /
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .step-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: #6c757d;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .setup-step.completed .step-number {
+            background-color: #28a745; 
+        }
+        .setup-step.active .step-number {
+            background-color: var(--primary-pink); 
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .step-content {
+            margin-top: 15px;
+        }
+        .file-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .file-input-group label {
+            font-size: 0.9em;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #ffffff;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: border-color 0.2s ease;
+        }
+        input[type="file"]:focus {
+            outline: none;
+            border-color: var(--primary-pink);
+        }
+        .status-info {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .status-info.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-info.pending {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background-color 0.3s ease;
+            margin-top: 15px;
+        }
+        .button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        .button:disabled {
+            background-color: #a5d6a7;
+            cursor: not-allowed;
+        }
+        .button.clear {
+            background-color: #f44336;
+        }
+        .button.clear:hover:not(:disabled) {
+            background-color: #d32f2f;
+        }
+        .button.primary {
+            background-color: var(--primary-pink);
+            font-size: 1em;
+            padding: 12px 24px;
+        }
+        .button.primary:hover:not(:disabled) {
+            background-color: var(--dark-pink);
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            gap: 2px;
+            overflow: hidden;
+            margin-top: 0;
+        }
+        .image-panel {
+            flex: 1;
+            background-color: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .edit-panel {
+            flex: 2; /* Make the edit panel wider */
+            background-color: #ffffff;
+            display: flex;
+            flex-direction: column; /* Stack header and content vertically */
+            overflow: hidden;
+        }
+        .panel-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 15px 20px;
+            font-weight: bold;
+            color: #495057;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .navigation {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .nav-button {
+            background-color: var(--primary-pink);
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .nav-button:hover:not(:disabled) {
+            background-color: var(--dark-pink);
+        }
+        .nav-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .question-counter {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        .image-container {
+            flex: 1;
+            padding: 20px;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #fafafa;
+        }
+        .image-display {
+            max-width: 100%;
+            max-height: 100%;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .no-image {
+            color: #6c757d;
+            font-style: italic;
+            text-align: center;
+            padding: 40px;
+            background-color: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+        }
+
+        /* NEW: Wrapper for the two sub-panels */
+        .edit-panel-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* NEW: Question List Panel */
+        .question-list-panel {
+            width: 300px; /* Fixed width for the list */
+            background-color: #f8f9fa;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .question-list-header {
+            padding: 15px 20px;
+            font-weight: bold;
+            color: #495057;
+            border-bottom: 1px solid #e0e0e0;
+            background-color: #e9ecef;
+        }
+        .question-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+            background-color: #ffffff;
+        }
+        .question-list-item {
+            padding: 10px 20px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s ease;
+            font-size: 0.9em;
+        }
+        .question-list-item:hover {
+            background-color: #f0f0f0;
+        }
+        .question-list-item.selected {
+            background-color: var(--light-pink);
+            border-left: 4px solid var(--primary-pink);
+            font-weight: bold;
+        }
+        .question-list-item .id {
+            color: #343a40;
+        }
+        .question-list-item .status {
+            font-size: 0.8em;
+            padding: 3px 6px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+        }
+        .question-list-item .status.minor { background-color: var(--status-minor); }
+        .question-list-item .status.major { background-color: var(--status-major); }
+        .question-list-item .status.no_edit { background-color: var(--status-no-edit); }
+        .question-list-item.modified .id {
+            color: #e67e22; /* Change color for modified items for visibility */
+        }
+
+
+        /* Question Details Panel (existing editContainer structure) */
+        .question-details-panel {
+            flex: 1;
+            padding: 20px;
+            overflow: auto;
+            display: flex; /* Use flex to center message when no question selected */
+            justify-content: center;
+            align-items: center;
+        }
+        .no-content-message {
+            color: #6c757d;
+            font-style: italic;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .question-card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e0e0e0;
+            width: 100%; 
+            box-sizing: border-box; 
+        }
+        .question-card.modified {
+            border-color: #ffc107;
+            box-shadow: 0 2px 10px rgba(255, 193, 7, 0.2);
+        }
+        .question-id {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: var(--primary-pink);
+            margin-bottom: 20px;
+            text-align: center;
+            background-color: var(--light-pink);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+            font-size: 0.95em;
+        }
+        .form-group input[type="text"],
+        .form-group textarea {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9em;
+            transition: border-color 0.2s ease;
+        }
+        .form-group input[type="text"]:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary-pink);
+            box-shadow: 0 0 0 2px rgba(255, 105, 180, 0.25); /* Using RGBA for primary pink */
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 120px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .content-display-mode {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .mode-button {
+            padding: 5px 15px;
+            border: 1px solid #ddd;
+            background: #f8f9fa;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.85em;
+            transition: all 0.2s ease;
+        }
+        .mode-button.active {
+            background: var(--primary-pink);
+            color: white;
+            border-color: var(--primary-pink);
+        }
+        .mode-button:hover:not(.active) {
+            background: #e9ecef;
+        }
+        /* Style for the new Done button */
+        .mode-button#doneEditingBtn {
+            background-color: var(--primary-pink);
+            color: white;
+            border-color: var(--primary-pink);
+        }
+        .mode-button#doneEditingBtn:hover {
+            background-color: var(--dark-pink);
+            border-color: var(--dark-pink);
+        }
+
+        .json-preview {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .display-content {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Times New Roman', serif;
+            font-size: 1em;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            text-align: center;
+        }
+        .message.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c3e6cb;
+        }
+        .message.error {
+            background-color: #ffebee;
+            color: #d32f2f;
+            border: 1px solid #ef9a9a;
+        }
+        .message.info {
+            background-color: var(--light-pink);
+            color: var(--info-color);
+            border: 1px solid var(--info-border);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-left: 10px;
+        }
+        .status-indicator.modified {
+            background-color: #ffc107;
+        }
+        .status-indicator.saved {
+            background-color: #28a745;
+        }
+        .edit-status-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px dashed #e0e0e0;
+        }
+        .edit-status-button {
+            padding: 10px 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f0f0f0;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+        .edit-status-button:hover:not(.active) {
+            background-color: #e9e9e9;
+            border-color: #a0a0a0;
+        }
+        .edit-status-button.active {
+            color: var(--edit-status-button-text-dark); 
+            box-shadow: 0 2px 5px rgba(255, 105, 180, 0.3); 
+        }
+        /* Specific colors for edit status buttons (active state) */
+        .edit-status-button#minorEditBtn.active { 
+            background-color: var(--minor-edit-button-color); 
+            border-color: var(--minor-edit-button-color); 
+        } 
+        .edit-status-button#majorEditBtn.active { 
+            background-color: var(--major-edit-button-color); 
+            border-color: var(--major-edit-button-color); 
+        } 
+        .edit-status-button#noEditBtn.active { 
+            background-color: var(--no-edit-button-color); 
+            border-color: var(--no-edit-button-color); 
+        } 
+        
+        .current-edit-status {
+            font-size: 0.9em;
+            font-weight: normal;
+            color: #6c757d; 
+            margin-top: 10px;
+            text-align: center;
+        }
+        .current-edit-status span {
+            font-weight: bold;
+            color: var(--current-status-text-color); 
+            /* No background on this span */
+        }
+
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 1024px) {
+            .setup-container {
+                padding: 30px; 
+            }
+            .setup-row {
+                flex-direction: column; 
+                align-items: center; 
+            }
+            .setup-step {
+                min-width: unset; /* Remove min-width when stacking */
+                width: 100%; /* Make steps take full width when stacked */
+                max-width: 100%; /* Allow full width when stacked */
+            }
+            .main-container {
+                flex-direction: column;
+            }
+            .image-panel {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+                max-height: 40vh;
+            }
+            .edit-panel-content {
+                flex-direction: column; 
+            }
+            .question-list-panel {
+                width: 100%; /* Full width when stacked */
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+                max-height: 30vh;
+            }
+            .question-details-panel {
+                width: 100%; /* Full width when stacked */
+                padding: 15px;
+            }
+        }
+        @media (max-width: 768px) {
+            .header {
+                padding: 15px;
+            }
+            .setup-container {
+                padding: 20px 10px; 
+            }
+            .image-container, .question-details-panel {
+                padding: 15px;
+            }
+            .edit-status-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ViExam OCR - Ground Truth</h1>
+        
+        <!-- Setup Steps -->
+        <div class="setup-container" id="setupContainer">
+            <div class="setup-row">
+                <div class="setup-step" id="step1">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Load Image Folder</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="file-input-group">
+                            <label>Select 'random_subset' folder (or folder containing subject folders):</label>
+                            <input type="file" id="imagefolderInput" webkitdirectory directory>
+                        </div>
+                        <div class="status-info pending" id="imageStatus">
+                            Select the folder containing question image subfolders
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-step" id="step2">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">Select JSON File</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="file-input-group">
+                            <label>Choose one JSON file:</label>
+                            <input type="file" id="jsonFileInput" accept=".json">
+                        </div>
+                        <div class="status-info pending" id="jsonStatus">
+                            Select a JSON file containing questions
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="setup-row">
+                <div class="setup-step" id="step3">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Start Editing</div>
+                    </div>
+                    <div class="step-content">
+                        <p>Once both are loaded, click the button below to start:</p>
+                        <button class="button primary" id="startEditingButton" disabled>Start Editing</button>
+                        <button class="button clear" id="clearAllButton">Clear All</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="statusMessage" class="message" style="display:none;"></div>
+    </div>
+
+    <!-- Main Editor - Hidden initially -->
+    <div class="main-container hidden" id="mainEditor">
+        <div class="image-panel">
+            <div class="panel-header">
+                <span>Question Image</span>
+                <div class="navigation">
+                    <button class="nav-button" id="prevButton" disabled>← Back</button>
+                    <span class="question-counter" id="questionCounter">0 / 0</span>
+                    <button class="nav-button" id="nextButton" disabled>Next →</button>
+                </div>
+            </div>
+            <div class="image-container" id="imageContainer">
+                <div class="no-image" id="noImageMessage">
+                    No image available for this question
+                </div>
+            </div>
+        </div>
+
+        <div class="edit-panel">
+            <div class="panel-header">
+                <span>Question Editor</span>
+                <button class="button" id="downloadEditedButton" disabled style="margin-top:0; padding: 8px 16px;">Download Edited File (0)</button>
+            </div>
+            <div class="edit-panel-content">
+                <div class="question-list-panel">
+                    <div class="question-list-header">All Questions</div>
+                    <div class="question-list-container" id="questionListContainer">
+                        <div class="no-content-message">Load JSON to see questions</div>
+                    </div>
+                </div>
+                
+                <div class="question-details-panel" id="questionDetailsPanel">
+                    <div class="no-content-message">Select a question from the list to edit</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configure MathJax
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true,
+                processEnvironments: true
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            }
+        };
+
+        // Global variables
+        let imageMap = new Map();
+        let currentQuestions = [];
+        let currentQuestionIndex = 0;
+        let fileData = null;
+        let hasImages = false;
+        let hasJson = false;
+
+        // DOM elements
+        const jsonFileInput = document.getElementById('jsonFileInput');
+        const imagefolderInput = document.getElementById('imagefolderInput');
+        const clearAllButton = document.getElementById('clearAllButton');
+        const startEditingButton = document.getElementById('startEditingButton');
+        const downloadEditedButton = document.getElementById('downloadEditedButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const imageContainer = document.getElementById('imageContainer');
+        const questionDetailsPanel = document.getElementById('questionDetailsPanel');
+        const prevButton = document.getElementById('prevButton');
+        const nextButton = document.getElementById('nextButton');
+        const questionCounter = document.getElementById('questionCounter');
+        const setupContainer = document.getElementById('setupContainer');
+        const mainEditor = document.getElementById('mainEditor');
+        const imageStatus = document.getElementById('imageStatus');
+        const jsonStatus = document.getElementById('jsonStatus');
+        const step1 = document.getElementById('step1');
+        const step2 = document.getElementById('step2');
+        const step3 = document.getElementById('step3');
+        const questionListContainer = document.getElementById('questionListContainer');
+
+        // Helper to show messages
+        function showMessage(msg, type = 'info') {
+            statusMessage.textContent = msg;
+            statusMessage.className = `message ${type}`;
+            statusMessage.style.display = 'block';
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 5000);
+        }
+
+        function updateQuestionListStatus(questionId, isModified) {
+            const listItem = document.querySelector(`.question-list-item[data-id="${questionId}"]`);
+            if (listItem) {
+                if (isModified) {
+                    listItem.classList.add('modified');
+                } else {
+                    listItem.classList.remove('modified');
+                }
+            }
+        }
+
+        // Update setup steps UI
+        function updateSetupSteps() {
+            if (hasImages) {
+                step1.classList.add('completed');
+                step1.classList.remove('active');
+                imageStatus.className = 'status-info success';
+                imageStatus.textContent = `✓ Loaded ${imageMap.size} images`;
+            } else {
+                step1.classList.add('active');
+                step1.classList.remove('completed');
+                imageStatus.className = 'status-info pending';
+                imageStatus.textContent = 'Select the folder containing question image subfolders';
+            }
+
+            if (hasJson) {
+                step2.classList.add('completed');
+                step2.classList.remove('active');
+                jsonStatus.className = 'status-info success';
+                jsonStatus.textContent = `✓ Loaded ${currentQuestions.length} questions`;
+            } else {
+                step2.classList.remove('completed');
+                jsonStatus.className = 'status-info pending';
+                jsonStatus.textContent = 'Select a JSON file containing questions';
+                if (hasImages) {
+                    step2.classList.add('active');
+                } else {
+                    step2.classList.remove('active');
+                }
+            }
+
+            if (hasImages && hasJson) {
+                step3.classList.add('active');
+                startEditingButton.disabled = false;
+            } else {
+                step3.classList.remove('active');
+                startEditingButton.disabled = true;
+            }
+        }
+
+        // Handle image folder selection
+        imagefolderInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files.length === 0) {
+                hasImages = false;
+                updateSetupSteps();
+                return;
+            }
+
+            imageMap.clear();
+            let loadedImages = 0;
+            let totalImageFiles = Array.from(files).filter(file => file.type.startsWith('image/')).length;
+
+            if (totalImageFiles === 0) {
+                showMessage('No image files found in the selected folder.', 'error');
+                hasImages = false;
+                updateSetupSteps();
+                return;
+            }
+
+            showMessage(`Loading ${totalImageFiles} images...`, 'info');
+            imageStatus.textContent = `Loading... 0/${totalImageFiles} images`;
+
+            Array.from(files).forEach(file => {
+                if (file.type.startsWith('image/')) {
+                    let questionId = file.name;
+                    if (questionId.toLowerCase().endsWith('.png')) {
+                        questionId = questionId.slice(0, -4); 
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        imageMap.set(questionId, e.target.result);
+                        loadedImages++;
+                        
+                        imageStatus.textContent = `Loading... ${loadedImages}/${totalImageFiles} images`;
+                        
+                        if (loadedImages === totalImageFiles) {
+                            hasImages = true;
+                            updateSetupSteps();
+                            showMessage(`Successfully loaded ${loadedImages} images!`, 'success');
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+            imagefolderInput.value = '';
+        });
+
+        // Handle JSON file selection
+        jsonFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                hasJson = false;
+                updateSetupSteps();
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = JSON.parse(e.target.result);
+                    if (Array.isArray(content) && content.every(item => typeof item === 'object' && ('ID' in item || 'id' in item))) {
+                        currentQuestions = content.map(q => {
+                            if ('id' in q && !('ID' in q)) { 
+                                q.ID = q.id;
+                                delete q.id;
+                            }
+                            if (q.ID && typeof q.ID === 'string' && q.ID.toLowerCase().endsWith('.png')) {
+                                q.ID = q.ID.slice(0, -4); 
+                            }
+                            q.editStatus = q.editStatus || 'no_edit';
+                            return q;
+                        });
+
+                        fileData = {
+                            questions: currentQuestions,
+                            isModified: false,
+                            modifiedQuestionIds: new Set(),
+                            fileName: file.name
+                        };
+                        
+                        hasJson = true;
+                        updateSetupSteps();
+                        showMessage(`Loaded ${currentQuestions.length} questions from ${file.name}`, 'success');
+                    } else {
+                        showMessage(`File ${file.name} is not a valid question JSON format.`, 'error');
+                        hasJson = false;
+                        updateSetupSteps();
+                    }
+                } catch (error) {
+                    showMessage(`Error reading file ${file.name}: ${error.message}`, 'error');
+                    console.error('JSON parse error:', error);
+                    hasJson = false;
+                    updateSetupSteps();
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        });
+
+        // Start editing
+        startEditingButton.addEventListener('click', () => {
+            if (!hasImages || !hasJson) {
+                showMessage('Please load both images and JSON file first', 'error');
+                return;
+            }
+
+            setupContainer.classList.add('hidden');
+            mainEditor.classList.remove('hidden');
+            
+            renderQuestionList();
+            currentQuestionIndex = 0;
+            displaySelectedQuestion(currentQuestionIndex);
+            
+            showMessage('Started editing mode!', 'success');
+        });
+
+        // Clear all data
+        clearAllButton.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all data? Unsaved changes will be lost.')) {
+                // ... reset all state variables ...
+                imageMap.clear();
+                currentQuestions = [];
+                fileData = null;
+                hasImages = false;
+                hasJson = false;
+                currentQuestionIndex = 0;
+                
+                // ... reset UI ...
+                updateSetupSteps(); 
+                setupContainer.classList.remove('hidden');
+                mainEditor.classList.add('hidden');
+                questionListContainer.innerHTML = '<div class="no-content-message">Load JSON to see questions</div>';
+                questionDetailsPanel.innerHTML = '<div class="no-content-message">Select a question from the list to edit</div>';
+                imageContainer.innerHTML = '<div class="no-image">No image available for this question</div>';
+                updateDownloadButton();
+                showMessage('All data cleared.', 'success');
+            }
+        });
+
+        // Navigation
+        prevButton.addEventListener('click', () => {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                displaySelectedQuestion(currentQuestionIndex);
+            }
+        });
+
+        nextButton.addEventListener('click', () => {
+            if (currentQuestionIndex < currentQuestions.length - 1) {
+                currentQuestionIndex++;
+                displaySelectedQuestion(currentQuestionIndex);
+            }
+        });
+
+        // Render the list of all questions
+        function renderQuestionList() {
+            questionListContainer.innerHTML = '';
+            if (currentQuestions.length === 0) {
+                questionListContainer.innerHTML = '<div class="no-content-message">No questions loaded</div>';
+                return;
+            }
+
+            currentQuestions.forEach((question, index) => {
+                const listItem = document.createElement('div');
+                listItem.className = 'question-list-item';
+                listItem.setAttribute('data-index', index);
+                listItem.setAttribute('data-id', question.ID);
+
+                const statusText = {
+                    'minor': 'Minor',
+                    'major': 'Major',
+                    'no_edit': 'No Edit'
+                }[question.editStatus] || 'N/A';
+
+                listItem.innerHTML = `
+                    <span class="id">${question.ID}</span>
+                    <span class="status ${question.editStatus}">${statusText}</span>
+                `;
+
+                if (fileData.modifiedQuestionIds.has(question.ID)) {
+                    listItem.classList.add('modified');
+                }
+
+                listItem.addEventListener('click', () => {
+                    displaySelectedQuestion(index);
+                });
+                questionListContainer.appendChild(listItem);
+            });
+        }
+
+        // Display details for a selected question
+        function displaySelectedQuestion(index) {
+            currentQuestionIndex = index;
+            if (index < 0 || index >= currentQuestions.length) {
+                questionDetailsPanel.innerHTML = '<div class="no-content-message">Select a question</div>';
+                imageContainer.innerHTML = '<div class="no-image">No image</div>';
+                questionCounter.textContent = '0 / 0';
+                prevButton.disabled = true;
+                nextButton.disabled = true;
+                return;
+            }
+
+            const question = currentQuestions[index];
+            
+            questionCounter.textContent = `${index + 1} / ${currentQuestions.length}`;
+            prevButton.disabled = index === 0;
+            nextButton.disabled = index === currentQuestions.length - 1;
+
+            document.querySelectorAll('.question-list-item.selected').forEach(item => item.classList.remove('selected'));
+            const selectedListItem = document.querySelector(`.question-list-item[data-index="${index}"]`);
+            if (selectedListItem) {
+                selectedListItem.classList.add('selected');
+                selectedListItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // CORE FIX: Pass fileData to the render functions
+            renderQuestionEditor(question, fileData);
+            updateImageDisplay(question);
+        }
+
+        function formatLatexContent(content) {
+            if (!content) return '(Empty content)';
+            let formatted = String(content).replace(/\\n/g, '\n');
+            formatted = formatted.replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/\\textit{([^}]*)}/g, '<em>$1</em>');
+            formatted = formatted.replace(/\\underline{([^}]*)}/g, '<u>$1</u>');
+            formatted = formatted.replace(/\n\s*\n/g, '\n\n'); 
+            return formatted;
+        }
+
+        function updateImageDisplay(question) {
+            const imageUrl = imageMap.get(question.ID);
+            if (imageUrl) {
+                imageContainer.innerHTML = `<img src="${imageUrl}" alt="Question ${question.ID}" class="image-display">`;
+            } else {
+                imageContainer.innerHTML = `<div class="no-image">No image available for this question</div>`;
+            }
+        }
+
+        // Render question editor - CORE FIX: Accept fileData
+        function renderQuestionEditor(question, fileData) {
+            const card = document.createElement('div');
+            card.className = 'question-card';
+            
+            if (fileData.modifiedQuestionIds.has(question.ID)) {
+                card.classList.add('modified');
+            }
+
+            card.innerHTML = `
+                <div class="question-id">Question ID: ${question.ID}</div>
+                <div class="form-group">
+                    <label>Image Path:</label>
+                    <input type="text" name="image_path" value="${question.image_path || ''}">
+                </div>
+                <div class="form-group">
+                    <label>Subject:</label>
+                    <input type="text" name="subject" value="${question.subject || ''}">
+                </div>
+            `;
+
+            // CORE FIX: Pass fileData to the content editor
+            const contentEditor = createContentEditor(question, fileData);
+            card.appendChild(contentEditor);
+
+            const editStatusDiv = document.createElement('div');
+            editStatusDiv.className = 'edit-status-buttons';
+            editStatusDiv.innerHTML = `
+                <button type="button" class="edit-status-button" id="minorEditBtn">Minor Edits</button>
+                <button type="button" class="edit-status-button" id="majorEditBtn">Major Edits</button>
+                <button type="button" class="edit-status-button" id="noEditBtn">No Edit</button>
+            `;
+            card.appendChild(editStatusDiv);
+
+            const currentStatusDisplay = document.createElement('div');
+            currentStatusDisplay.className = 'current-edit-status';
+            card.appendChild(currentStatusDisplay);
+            
+            questionDetailsPanel.innerHTML = '';
+            questionDetailsPanel.appendChild(card);
+
+            card.querySelectorAll('input[name="image_path"], input[name="subject"]').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    question[e.target.name] = e.target.value;
+                    fileData.modifiedQuestionIds.add(question.ID);
+                    card.classList.add('modified'); 
+                    updateDownloadButton();
+                    updateQuestionListStatus(question.ID, true); 
+                });
+            });
+
+            const minorEditBtn = document.getElementById('minorEditBtn');
+            const majorEditBtn = document.getElementById('majorEditBtn');
+            const noEditBtn = document.getElementById('noEditBtn');
+
+            const setEditStatus = (status) => {
+                question.editStatus = status;
+                fileData.modifiedQuestionIds.add(question.ID); 
+                updateDownloadButton();
+                updateEditStatusUI(); 
+                
+                const listItem = document.querySelector(`.question-list-item[data-id="${question.ID}"]`);
+                if (listItem) {
+                    const statusSpan = listItem.querySelector('.status');
+                    statusSpan.className = `status ${status}`;
+                    statusSpan.textContent = {'minor': 'Minor', 'major': 'Major', 'no_edit': 'No Edit'}[status];
+                    listItem.classList.add('modified');
+                }
+            };
+
+            minorEditBtn.addEventListener('click', () => setEditStatus('minor'));
+            majorEditBtn.addEventListener('click', () => setEditStatus('major'));
+            noEditBtn.addEventListener('click', () => setEditStatus('no_edit'));
+
+            const updateEditStatusUI = () => {
+                [minorEditBtn, majorEditBtn, noEditBtn].forEach(btn => btn.classList.remove('active'));
+                const statusMap = {'minor': minorEditBtn, 'major': majorEditBtn, 'no_edit': noEditBtn};
+                if(statusMap[question.editStatus]) statusMap[question.editStatus].classList.add('active');
+
+                const statusTextMap = {'minor': 'Minor Edits', 'major': 'Major Edits', 'no_edit': 'No Edit'};
+                currentStatusDisplay.innerHTML = `Current Status: <span>${statusTextMap[question.editStatus] || 'N/A'}</span>`;
+            };
+            updateEditStatusUI(); 
+        }
+
+        // Create content editor - CORE FIX: Accept fileData
+        function createContentEditor(question, fileData) {
+            const container = document.createElement('div');
+            container.className = 'form-group';
+
+            container.innerHTML = `<label>Content:</label>`;
+
+            const modeSelector = document.createElement('div');
+            modeSelector.className = 'content-display-mode';
+            modeSelector.innerHTML = `
+                <button type="button" class="mode-button active" id="rawModeBtn">Raw Editor</button>
+                <button type="button" class="mode-button" id="previewModeBtn">Raw Preview</button>
+                <button type="button" class="mode-button" id="doneEditingBtn">Done</button>
+            `;
+            container.appendChild(modeSelector);
+
+            const textarea = document.createElement('textarea');
+            textarea.name = 'content';
+            textarea.rows = 8;
+            
+            let rawContent = '';
+            if (question.content !== undefined) {
+                rawContent = String(question.content);
+            } else if (question.Content !== undefined) {
+                rawContent = String(question.Content);
+            }
+            textarea.value = rawContent;
+            container.appendChild(textarea);
+
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'json-preview';
+            previewDiv.style.display = 'none';
+            container.appendChild(previewDiv);
+
+            container.insertAdjacentHTML('beforeend', `<label style="margin-top: 15px;">Display Content (MathJax & Basic HTML):</label>`);
+
+            const displayDiv = document.createElement('div');
+            displayDiv.className = 'display-content tex2jax_process';
+            container.appendChild(displayDiv);
+            
+            const updatePreview = () => {
+                previewDiv.textContent = textarea.value.trim() === '' ? '(Empty content)' : textarea.value;
+            }
+            
+            const updateDisplayContent = () => {
+                const content = textarea.value;
+                displayDiv.innerHTML = content.trim() === '' ? '<em>(Empty content)</em>' : formatLatexContent(content);
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise([displayDiv]).catch(err => console.log('MathJax error:', err));
+                }
+            }
+
+            container.querySelector('#rawModeBtn').addEventListener('click', () => {
+                container.querySelector('#rawModeBtn').classList.add('active');
+                container.querySelector('#previewModeBtn').classList.remove('active');
+                textarea.style.display = 'block';
+                previewDiv.style.display = 'none';
+            });
+
+            container.querySelector('#previewModeBtn').addEventListener('click', () => {
+                container.querySelector('#previewModeBtn').classList.add('active');
+                container.querySelector('#rawModeBtn').classList.remove('active');
+                textarea.style.display = 'none';
+                previewDiv.style.display = 'block';
+                updatePreview(); 
+            });
+
+            textarea.addEventListener('input', () => {
+                const newValue = textarea.value;
+                if ('content' in question || !('Content' in question)) { 
+                    question.content = newValue;
+                } else { 
+                    question.Content = newValue;
+                }
+                fileData.modifiedQuestionIds.add(question.ID);
+                updateDownloadButton();
+                updateQuestionListStatus(question.ID, true); 
+                document.querySelector('.question-card')?.classList.add('modified');
+            });
+
+            container.querySelector('#doneEditingBtn').addEventListener('click', () => {
+                updateDisplayContent();
+                updatePreview(); 
+                showMessage('Content preview updated.', 'info'); 
+            });
+
+            setTimeout(() => {
+                updateDisplayContent();
+                updatePreview();
+            }, 100);
+
+            return container;
+        }
+
+        function updateDownloadButton() {
+            if (!fileData) {
+                downloadEditedButton.disabled = true;
+                downloadEditedButton.textContent = 'Download Edited File (0)';
+                return;
+            }
+            const modifiedCount = fileData.modifiedQuestionIds.size;
+            downloadEditedButton.textContent = `Download Edited File (${modifiedCount})`;
+            downloadEditedButton.disabled = modifiedCount === 0;
+        }
+
+        downloadEditedButton.addEventListener('click', async () => {
+            if (!fileData || fileData.modifiedQuestionIds.size === 0) {
+                showMessage('No changes to download.', 'info');
+                return;
+            }
+
+            const zip = new JSZip();
+            const categorizedQuestions = {'Minor Edits': [], 'Major Edits': [], 'No Edits': []};
+
+            const questionsToProcess = currentQuestions.filter(q => fileData.modifiedQuestionIds.has(q.ID));
+
+            questionsToProcess.forEach(q => {
+                const qCopy = JSON.parse(JSON.stringify(q)); 
+                const statusFolder = {'minor': 'Minor Edits', 'major': 'Major Edits', 'no_edit': 'No Edits'}[q.editStatus] || 'No Edits'; 
+                delete qCopy.editStatus; 
+                categorizedQuestions[statusFolder].push(qCopy);
+            });
+
+            for (const folderName in categorizedQuestions) {
+                if (categorizedQuestions[folderName].length > 0) {
+                    zip.file(`${folderName}/questions.json`, JSON.stringify(categorizedQuestions[folderName], null, 4));
+                }
+            }
+            
+            try {
+                const content = await zip.generateAsync({ type: 'blob' });
+                saveAs(content, `ViExam_Edited_${fileData.fileName.replace('.json', '')}.zip`);
+                showMessage(`Successfully downloaded ZIP file!`, 'success');
+                
+                fileData.modifiedQuestionIds.clear();
+                
+                updateDownloadButton();
+                renderQuestionList(); // Re-render list to clear modified styles
+                displaySelectedQuestion(currentQuestionIndex); // Refresh UI for current question
+            } catch (error) {
+                showMessage(`Error creating ZIP file: ${error.message}`, 'error');
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            updateSetupSteps();
+            updateDownloadButton();
+        });
+    </script>
+</body>
+</html>
