@@ -13,9 +13,9 @@
     <sup>1</sup>KAIST
   </p>
 
-[![Project Page](https://img.shields.io/badge/Project_Page-viexam.github.io-blue.svg)](https://viexam.github.io)
-[![arXiv](https://img.shields.io/badge/arXiv-xxxx.xxxxx-b31b1b.svg)](https://arxiv.org/abs/xxxx.xxxxx)
-[![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-Dataset-yellow.svg)](https://huggingface.co/datasets/username/viexam)
+[![Project Page](https://img.shields.io/badge/Project_Page-viexam.github.io-blue.svg)](https://vi-exam.github.io/)
+[![arXiv](https://img.shields.io/badge/arXiv-xxxx.xxxxx-b31b1b.svg)](https://arxiv.org/abs/2508.13680)
+[![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-Dataset-yellow.svg)](https://huggingface.co/datasets/anvo25/viexam)
 [![Code License](https://img.shields.io/badge/Code_License-MIT-green.svg)](LICENSE)
 
 </div>
