@@ -2,15 +2,15 @@
 
 <div align="center">    
   <p style="font-size: 20px;">by 
-    <a href="https://www.linkedin.com/in/dang-thi-tuong-vy-00a357278/">Vy Tuong Dang</a><sup>1*</sup>,
-    <a href="https://anvo25.github.io/">An Vo</a><sup>1*</sup>,
-    <a href="https://www.linkedin.com/in/quang-tau-a708b4238/?originalSubdomain=kr">Quang Tau</a><sup>1</sup>, 
-    <a href="https://www.resl.kaist.ac.kr/members/master-student#h.fiaa4al7sz8u">Duc Dm</a><sup>1</sup>, 
-    <a href="https://www.resl.kaist.ac.kr/members/director">Daeyoung Kim</a><sup>1</sup>
+    <a href="https://www.linkedin.com/in/dang-thi-tuong-vy-00a357278/">Vy Tuong Dang</a><sup>*</sup>,
+    <a href="https://anvo25.github.io/">An Vo</a><sup>*</sup>,
+    <a href="https://www.linkedin.com/in/quang-tau-a708b4238/?originalSubdomain=kr">Quang Tau</a>, 
+    <a href="https://www.resl.kaist.ac.kr/members/master-student#h.fiaa4al7sz8u">Duc Dm</a>, 
+    <a href="https://www.resl.kaist.ac.kr/members/director">Daeyoung Kim</a>
   </p>
   <p>
     <sup>*</sup>Equal contribution<br>
-    <sup>1</sup>KAIST
+    KAIST
   </p>
 
 [![Project Page](https://img.shields.io/badge/Project_Page-viexam.github.io-blue.svg)](https://vi-exam.github.io/)
